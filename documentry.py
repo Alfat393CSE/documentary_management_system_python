@@ -1,6 +1,7 @@
 import sqlite3
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, filedialog, ttk
+import csv
 import ttkbootstrap as tb
 
 # Database setup
@@ -21,7 +22,7 @@ conn.commit()
 # App window
 app = tb.Window(themename="cyborg")
 app.title("🎬 Documentary Management System")
-app.geometry("800x500")
+app.geometry("900x600")
 
 # Frame for form
 form_frame = tb.Frame(app, padding=10)
@@ -50,19 +51,36 @@ rating_entry.grid(row=0, column=5, padx=5, pady=5)
 
 # Table for data display
 columns = ("ID", "Title", "Director", "Year", "Category", "Rating")
-tree = ttk.Treeview(app, columns=columns, show="headings", height=12)
+tree = ttk.Treeview(app, columns=columns, show="headings", height=15)
 for col in columns:
     tree.heading(col, text=col)
-    tree.column(col, width=100)
+    tree.column(col, width=120)
 tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-# CRUD functions
-def refresh_table():
+# Label for statistics
+stats_label = tb.Label(app, text="", bootstyle="info")
+stats_label.pack(pady=5)
+
+# CRUD + Extra functions
+def refresh_table(order_by=None, category_filter=None):
     for row in tree.get_children():
         tree.delete(row)
-    cursor.execute("SELECT * FROM documentaries")
-    for row in cursor.fetchall():
+    
+    query = "SELECT * FROM documentaries"
+    params = ()
+    if category_filter:
+        query += " WHERE category=?"
+        params = (category_filter,)
+    if order_by:
+        query += f" ORDER BY {order_by}"
+
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+
+    for row in rows:
         tree.insert("", "end", values=row)
+    
+    update_stats()
 
 def add_doc():
     title, director, year, category, rating = (
@@ -126,6 +144,7 @@ def search_doc():
     cursor.execute("SELECT * FROM documentaries WHERE title LIKE ?", ('%' + query + '%',))
     for row in cursor.fetchall():
         tree.insert("", "end", values=row)
+    update_stats()
 
 def clear_form():
     title_entry.delete(0, tk.END)
@@ -133,6 +152,33 @@ def clear_form():
     year_entry.delete(0, tk.END)
     category_entry.delete(0, tk.END)
     rating_entry.delete(0, tk.END)
+
+def export_csv():
+    file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
+    if file_path:
+        cursor.execute("SELECT * FROM documentaries")
+        rows = cursor.fetchall()
+        with open(file_path, mode="w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(columns)
+            writer.writerows(rows)
+        messagebox.showinfo("Exported", f"Data exported to {file_path}")
+
+def update_stats():
+    cursor.execute("SELECT COUNT(*), AVG(rating) FROM documentaries")
+    count, avg_rating = cursor.fetchone()
+    stats_label.config(text=f"📊 Total: {count} documentaries | ⭐ Avg. Rating: {round(avg_rating,2) if avg_rating else 'N/A'}")
+
+def on_row_double_click(event):
+    selected = tree.selection()
+    if selected:
+        values = tree.item(selected[0])['values']
+        clear_form()
+        title_entry.insert(0, values[1])
+        director_entry.insert(0, values[2])
+        year_entry.insert(0, values[3])
+        category_entry.insert(0, values[4])
+        rating_entry.insert(0, values[5])
 
 # Buttons
 btn_frame = tb.Frame(app, padding=10)
@@ -142,8 +188,25 @@ tb.Button(btn_frame, text="Add", bootstyle="success", command=add_doc).pack(side
 tb.Button(btn_frame, text="Update", bootstyle="info", command=update_doc).pack(side="left", padx=5)
 tb.Button(btn_frame, text="Delete", bootstyle="danger", command=delete_doc).pack(side="left", padx=5)
 tb.Button(btn_frame, text="Search", bootstyle="warning", command=search_doc).pack(side="left", padx=5)
-tb.Button(btn_frame, text="Refresh", bootstyle="secondary", command=refresh_table).pack(side="left", padx=5)
+tb.Button(btn_frame, text="Refresh", bootstyle="secondary", command=lambda: refresh_table()).pack(side="left", padx=5)
 tb.Button(btn_frame, text="Clear", bootstyle="dark", command=clear_form).pack(side="left", padx=5)
+tb.Button(btn_frame, text="Export CSV", bootstyle="primary", command=export_csv).pack(side="left", padx=5)
+
+# Sorting and filtering
+sort_frame = tb.Frame(app, padding=10)
+sort_frame.pack(fill="x")
+
+tb.Label(sort_frame, text="Sort by:").pack(side="left", padx=5)
+tb.Button(sort_frame, text="Year", bootstyle="secondary", command=lambda: refresh_table("year")).pack(side="left", padx=5)
+tb.Button(sort_frame, text="Rating", bootstyle="secondary", command=lambda: refresh_table("rating DESC")).pack(side="left", padx=5)
+
+tb.Label(sort_frame, text="Filter by Category:").pack(side="left", padx=10)
+filter_entry = tb.Entry(sort_frame, width=20)
+filter_entry.pack(side="left", padx=5)
+tb.Button(sort_frame, text="Apply Filter", bootstyle="info", command=lambda: refresh_table(None, filter_entry.get())).pack(side="left", padx=5)
+
+# Double-click event for editing
+tree.bind("<Double-1>", on_row_double_click)
 
 # Load data initially
 refresh_table()
